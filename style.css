@@ -205,6 +205,13 @@ body {
     border-radius: 6px;
 }
 
+.sono-highlight {
+    background: rgba(255, 255, 255, 0.18) !important;
+    border-color: rgba(255, 255, 255, 0.35) !important;
+    transform: scale(1.03);
+    transition: 0.15s ease;
+}
+
 /* ======================================================
    FIDS
 ====================================================== */
