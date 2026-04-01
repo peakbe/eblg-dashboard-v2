@@ -1,17 +1,16 @@
 // ======================================================
-// CONFIGURATION
+// CONFIGURATION GLOBALE
 // ======================================================
 
-const PROXY = "https://eblg-proxy.onrender.com";
+export const PROXY = "https://eblg-proxy.onrender.com";
 
-const ENDPOINTS = {
+export const ENDPOINTS = {
     metar: `${PROXY}/metar`,
     taf: `${PROXY}/taf`,
-    fids: `${PROXY}/fids`,
-    notam: `${PROXY}/notam`
+    fids: `${PROXY}/fids`
 };
 
-const SONOS = [
+export const SONOS = [
   { id:"F017", lat:50.764883, lon:5.630606 },
   { id:"F001", lat:50.737, lon:5.608833 },
   { id:"F014", lat:50.718894, lon:5.573164 },
@@ -30,7 +29,8 @@ const SONOS = [
   { id:"F006", lat:50.609594, lon:5.271403 },
   { id:"F012", lat:50.621917, lon:5.254747 }
 ];
-const SONO_ADDRESSES = {
+
+export const SONO_ADDRESSES = {
     "F017": "Rue de la Pommeraie, 4690 Wonck, Belgique",
     "F001": "Rue Franquet, Houtain",
     "F014": "Rue Léon Labaye, Juprelle",
@@ -49,18 +49,11 @@ const SONO_ADDRESSES = {
     "F006": "Rue Bolly Chapon, Seraing",
     "F012": "Rue Barbe d'Or, 4317 Aineffe"
 };
-
-let heatLayer = null;
-let sonometers = {};
-let map;
-let runwayLayer = null;
-let corridorLayer = null;
-
 // ======================================================
 // HELPERS
 // ======================================================
 
-async function fetchJSON(url) {
+export async function fetchJSON(url) {
     try {
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -71,7 +64,25 @@ async function fetchJSON(url) {
     }
 }
 
-function updateStatusPanel(service, data) {
+export function deg2rad(d) {
+    return d * Math.PI / 180;
+}
+
+export function haversineDistance(a, b) {
+    const R = 6371;
+    const dLat = deg2rad(b[0] - a[0]);
+    const dLon = deg2rad(b[1] - a[1]);
+    const lat1 = deg2rad(a[0]);
+    const lat2 = deg2rad(b[0]);
+
+    const h = Math.sin(dLat/2)**2 +
+              Math.cos(lat1) * Math.cos(lat2) *
+              Math.sin(dLon/2)**2;
+
+    return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+export function updateStatusPanel(service, data) {
     const panel = document.getElementById("status-panel");
     if (!panel) return;
 
@@ -90,37 +101,102 @@ function updateStatusPanel(service, data) {
     panel.className = "status-ok";
     panel.innerText = `${service} : OK`;
 }
+import { SONOS, SONO_ADDRESSES } from "./config.js";
+import { haversineDistance } from "./helpers.js";
 
-function deg2rad(d) {
-    return d * Math.PI / 180;
-}
+export let sonometers = {};
+export let heatLayer = null;
 
-function offsetPoint(lat, lng, distance_m, bearing_deg) {
-    const R = 6378137;
-    const br = deg2rad(bearing_deg);
-    const dR = distance_m / R;
+export function highlightSonometerInList(id) {
+    const list = document.getElementById("sono-list");
+    if (!list) return;
 
-    const lat1 = deg2rad(lat);
-    const lng1 = deg2rad(lng);
-
-    const lat2 = Math.asin(
-        Math.sin(lat1) * Math.cos(dR) +
-        Math.cos(lat1) * Math.sin(dR) * Math.cos(br)
+    list.querySelectorAll(".sono-item").forEach(el =>
+        el.classList.remove("sono-highlight")
     );
 
-    const lng2 = lng1 + Math.atan2(
-        Math.sin(br) * Math.sin(dR) * Math.cos(lat1),
-        Math.cos(dR) - Math.sin(lat1) * Math.sin(lat2)
-    );
-
-    return [lat2 * 180 / Math.PI, lng2 * 180 / Math.PI];
+    const item = [...list.children].find(el => el.textContent.trim() === id);
+    if (item) {
+        item.classList.add("sono-highlight");
+        item.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
 }
 
+export function updateHeatmap(map) {
+    if (heatLayer) map.removeLayer(heatLayer);
+
+    const points = Object.values(sonometers).map(s => {
+        let weight = 0.2;
+        if (s.marker.options.color === "green") weight = 0.6;
+        if (s.marker.options.color === "red") weight = 1.0;
+        return [s.lat, s.lon, weight];
+    });
+
+    heatLayer = L.heatLayer(points, {
+        radius: 35,
+        blur: 25,
+        maxZoom: 12,
+        minOpacity: 0.3
+    }).addTo(map);
+}
+
+export function showDetailPanel(id, runwayHeading) {
+    const s = sonometers[id];
+    if (!s) return;
+
+    const panel = document.getElementById("detail-panel");
+    const title = document.getElementById("detail-title");
+    const address = document.getElementById("detail-address");
+    const town = document.getElementById("detail-town");
+    const status = document.getElementById("detail-status");
+    const distance = document.getElementById("detail-distance");
+
+    const fullAddress = SONO_ADDRESSES[id] || "Adresse inconnue";
+    const townName = fullAddress.split(",")[1] || "—";
+
+    const d = haversineDistance([s.lat, s.lon], runwayHeading).toFixed(2);
+
+    title.textContent = id;
+    address.textContent = fullAddress;
+    town.textContent = townName.trim();
+    status.textContent = s.marker.options.color.toUpperCase();
+    distance.textContent = `${d} km`;
+
+    panel.classList.remove("hidden");
+}
+
+export function initSonometers(map) {
+    SONOS.forEach(s => {
+        const marker = L.circleMarker([s.lat, s.lon], {
+            radius: 6,
+            color: "gray",
+            fillColor: "gray",
+            fillOpacity: 0.9,
+            weight: 1
+        }).addTo(map);
+
+        const address = SONO_ADDRESSES[s.id] || "Adresse inconnue";
+
+        marker.bindTooltip(s.id);
+
+        marker.on("click", () => {
+            marker.bindPopup(`<b>${s.id}</b><br>${address}`).openPopup();
+            highlightSonometerInList(s.id);
+            showDetailPanel(s.id, [50.64695, 5.44340]); // centre piste 22
+        });
+
+        sonometers[s.id] = { ...s, marker, status: "UNKNOWN" };
+    });
+}
 // ======================================================
-// RUNWAYS / CORRIDORS
+// RUNWAYS & CORRIDORS
 // ======================================================
 
-const RUNWAYS = {
+/**
+ * Définitions des pistes EBLG.
+ * heading = QFU réel
+ */
+export const RUNWAYS = {
     "22": {
         heading: 220,
         start: [50.64695, 5.44340],
@@ -135,7 +211,10 @@ const RUNWAYS = {
     }
 };
 
-const CORRIDORS = {
+/**
+ * Corridors d’approche/départ simplifiés.
+ */
+export const CORRIDORS = {
     "04": [
         [50.700000, 5.300000],
         [50.670000, 5.380000],
@@ -148,13 +227,13 @@ const CORRIDORS = {
     ]
 };
 
-// ======================================================
-// RUNWAY SYSTEM
-// ======================================================
-
-function drawRunway(runway) {
-    if (!runwayLayer) return;
-    runwayLayer.clearLayers();
+/**
+ * Dessine la piste active sur la carte.
+ * @param {string} runway - "22", "04" ou "UNKNOWN"
+ * @param {L.LayerGroup} layer - layer Leaflet
+ */
+export function drawRunway(runway, layer) {
+    layer.clearLayers();
     if (runway === "UNKNOWN") return;
 
     const r = RUNWAYS[runway];
@@ -180,47 +259,40 @@ function drawRunway(runway) {
         weight: 1,
         fillColor: "#333",
         fillOpacity: 0.9
-    }).addTo(runwayLayer);
+    }).addTo(layer);
 
     L.polyline([r.start, r.end], {
         color: "#fff",
         weight: 2,
         dashArray: "8,8"
-    }).addTo(runwayLayer);
+    }).addTo(layer);
 
     const num1 = (r.heading / 10).toFixed(0).padStart(2, "0");
     const num2 = (((r.heading + 180) % 360) / 10).toFixed(0).padStart(2, "0");
 
     L.marker(r.start, {
         icon: L.divIcon({ className: "runway-number", html: num1 })
-    }).addTo(runwayLayer);
+    }).addTo(layer);
 
     L.marker(r.end, {
         icon: L.divIcon({ className: "runway-number", html: num2 })
-    }).addTo(runwayLayer);
-
-    const centerLat = (lat1 + lat2) / 2;
-    const centerLng = (lng1 + lng2) / 2;
-
-    L.marker([centerLat, centerLng], {
-        icon: L.divIcon({
-            className: "qfu-label",
-            html: `QFU ${num1}/${num2}`
-        })
-    }).addTo(runwayLayer);
+    }).addTo(layer);
 }
 
-function drawCorridor(runway) {
-    if (!corridorLayer) return;
-    corridorLayer.clearLayers();
+/**
+ * Dessine le corridor d’approche/départ.
+ * @param {string} runway
+ * @param {L.LayerGroup} layer
+ */
+export function drawCorridor(runway, layer) {
+    layer.clearLayers();
     if (runway === "UNKNOWN") return;
 
-    const r = RUNWAYS[runway];
-    const line = L.polyline([r.start, r.end], {
+    const line = L.polyline(CORRIDORS[runway], {
         color: "orange",
         weight: 2,
         dashArray: "6,6"
-    }).addTo(corridorLayer);
+    }).addTo(layer);
 
     if (L.polylineDecorator) {
         L.polylineDecorator(line, {
@@ -233,18 +305,27 @@ function drawCorridor(runway) {
                     pathOptions: { stroke: true, color: "orange" }
                 })
             }]
-        }).addTo(corridorLayer);
+        }).addTo(layer);
     }
 }
 
-function getRunwayFromWind(windDir) {
+/**
+ * Détermine la piste active en fonction du vent.
+ * @param {number} windDir
+ * @returns {string}
+ */
+export function getRunwayFromWind(windDir) {
     if (!windDir) return "UNKNOWN";
     const diff22 = Math.abs(windDir - 220);
     const diff04 = Math.abs(windDir - 40);
     return diff22 < diff04 ? "22" : "04";
 }
 
-function computeCrosswind(windDir, windSpeed, runwayHeading) {
+/**
+ * Calcule le crosswind.
+ * @returns {{crosswind:number, angleDiff:number}}
+ */
+export function computeCrosswind(windDir, windSpeed, runwayHeading) {
     if (!windDir || !windSpeed || !runwayHeading)
         return { crosswind: 0, angleDiff: 0 };
 
@@ -254,84 +335,46 @@ function computeCrosswind(windDir, windSpeed, runwayHeading) {
 
     return { crosswind, angleDiff };
 }
-
-function updateRunwayPanel(runway, windDir, windSpeed, phase) {
-    const panel = document.getElementById("runway-panel");
-    if (!panel) return;
-
-    if (runway === "UNKNOWN") {
-        panel.className = "runway-unknown";
-        panel.innerText = "Piste inconnue";
-        return;
-    }
-
-    const r = RUNWAYS[runway];
-    const info = computeCrosswind(windDir, windSpeed, r.heading);
-
-    panel.className = runway === "22" ? "runway-22" : "runway-04";
-    panel.innerText =
-        `Piste ${runway} (${r.heading}°) – ` +
-        `${phase === "landing" ? "Décollage/Atterrissage" : "Décollage"} – ` +
-        `${info.crosswind} kt crosswind (Δ${info.angleDiff}°) – ` +
-        `Vent ${windDir}°/${windSpeed} kt`;
-}
-
 // ======================================================
 // SONOMÈTRES
 // ======================================================
 
-function getSonometerColor(runway) {
-    if (runway === "22") return "red";
-    if (runway === "04") return "blue";
-    return "gray";
-}
+import { SONOS, SONO_ADDRESSES } from "./config.js";
+import { haversineDistance } from "./helpers.js";
 
-function initSonometers(mapInstance) {
-    SONOS.forEach(s => {
+export let sonometers = {};
+export let heatLayer = null;
 
-        const marker = L.circleMarker([s.lat, s.lon], {
-            radius: 6,
-            color: "gray",
-            fillColor: "gray",
-            fillOpacity: 0.9,
-            weight: 1
-        }).addTo(mapInstance);
+/**
+ * Surligne un sonomètre dans la liste.
+ * @param {string} id
+ */
+export function highlightSonometerInList(id) {
+    const list = document.getElementById("sono-list");
+    if (!list) return;
 
-        const address = SONO_ADDRESSES[s.id] || "Adresse inconnue";
+    list.querySelectorAll(".sono-item").forEach(el =>
+        el.classList.remove("sono-highlight")
+    );
 
-        marker.bindTooltip(s.id, { permanent: false });
-
-      marker.on("click", () => {
-    marker.bindPopup(`
-        <b>${s.id}</b><br>
-        Adresse : ${address}
-    `).openPopup();
-
-    highlightSonometerInList(s.id);
-    showDetailPanel(s.id);
-});
-
-
-
-        sonometers[s.id] = {
-            ...s,
-            marker,
-            status: "UNKNOWN"
-        };
-    });
-}
-
-function updateHeatmap() {
-    if (heatLayer) {
-        map.removeLayer(heatLayer);
+    const item = [...list.children].find(el => el.textContent.trim() === id);
+    if (item) {
+        item.classList.add("sono-highlight");
+        item.scrollIntoView({ behavior: "smooth", block: "center" });
     }
+}
+
+/**
+ * Met à jour la heatmap en fonction des statuts.
+ * @param {L.Map} map
+ */
+export function updateHeatmap(map) {
+    if (heatLayer) map.removeLayer(heatLayer);
 
     const points = Object.values(sonometers).map(s => {
-        let weight = 0.2; // gris
-
+        let weight = 0.2;
         if (s.marker.options.color === "green") weight = 0.6;
         if (s.marker.options.color === "red") weight = 1.0;
-
         return [s.lat, s.lon, weight];
     });
 
@@ -343,117 +386,12 @@ function updateHeatmap() {
     }).addTo(map);
 }
 
-function updateSonometers(runway) {
-    const color = getSonometerColor(runway);
-    Object.values(sonometers).forEach(s => {
-        s.marker.setStyle({ color, fillColor: color });
-        s.status = runway;
-    });
-}
-
-function updateSonometersAdvanced(runway, phase) {
-    Object.values(sonometers).forEach(s =>
-        s.marker.setStyle({ color: "gray", fillColor: "gray" })
-    );
-
-    if (runway === "UNKNOWN") return;
-
-    let green = [];
-    let red = [];
-
-    if (runway === "22") {
-        green = phase === "takeoff"
-            ? ["F002","F003","F004","F005","F006","F007","F008","F009","F010","F011","F012","F013","F016"]
-            : ["F001","F014","F015","F017"];
-    }
-
-    if (runway === "04") {
-        if (phase === "takeoff") {
-            green = ["F002","F003","F007","F008","F009","F011","F013"];
-            red   = ["F004","F005","F006","F010","F012","F016"];
-        } else {
-            green = ["F014","F015"];
-            red   = ["F001","F017"];
-        }
-    }
-
-    green.forEach(id => sonometers[id]?.marker.setStyle({ color: "green", fillColor: "green" }));
-    red.forEach(id => sonometers[id]?.marker.setStyle({ color: "red", fillColor: "red" }));
-    updateHeatmap();
-}
-
-function updateSonometerPanel() {
-    const list = document.getElementById("sono-list");
-    const stats = document.getElementById("sono-stats");
-    if (!list || !stats) return;
-
-    const all = Object.values(sonometers);
-    const green = all.filter(s => s.marker.options.color === "green");
-    const red   = all.filter(s => s.marker.options.color === "red");
-    const gray  = all.filter(s => s.marker.options.color === "gray");
-
-    stats.innerHTML =
-        `<b>${green.length}</b> verts – <b>${red.length}</b> rouges – <b>${gray.length}</b> neutres`;
-
-    const sorted = [...green, ...red, ...gray];
-
-    list.innerHTML = sorted.map(s => {
-        let cls = "sono-gray";
-        if (s.marker.options.color === "green") cls = "sono-green";
-        if (s.marker.options.color === "red") cls = "sono-red";
-        return `<div class="sono-item ${cls}"><span>${s.id}</span></div>`;
-    }).join("");
-
-    updateSonoChart(green.length, red.length, gray.length);
-}
-
-function highlightSonometerInList(id) {
-    const list = document.getElementById("sono-list");
-    if (!list) return;
-
-    // Retirer l'ancien highlight
-    list.querySelectorAll(".sono-item").forEach(el =>
-        el.classList.remove("sono-highlight")
-    );
-
-    // Ajouter le highlight au bon élément
-    const item = [...list.children].find(el => el.textContent.trim() === id);
-    if (item) {
-        item.classList.add("sono-highlight");
-
-        // Scroll automatique vers l’élément
-        item.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-}
-
-function updateSonoChart(g, r, y) {
-    const canvas = document.getElementById("sono-chart");
-    if (!canvas) return;
-
-    const ctx = canvas.getContext("2d");
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    const total = g + r + y || 1;
-    const barWidth = 60;
-    const spacing = 20;
-    const baseY = 55;
-    const scale = 50 / total;
-
-    ctx.fillStyle = "green";
-    ctx.fillRect(10, baseY - g * scale, barWidth, g * scale);
-
-    ctx.fillStyle = "red";
-    ctx.fillRect(10 + barWidth + spacing, baseY - r * scale, barWidth, r * scale);
-
-    ctx.fillStyle = "gray";
-    ctx.fillRect(10 + 2 * (barWidth + spacing), baseY - y * scale, barWidth, y * scale);
-
-    ctx.fillStyle = "#333";
-    ctx.fillText("V", 35, baseY + 10);
-    ctx.fillText("R", 35 + barWidth + spacing, baseY + 10);
-    ctx.fillText("N", 35 + 2 * (barWidth + spacing), baseY + 10);
-}
-function showDetailPanel(id) {
+/**
+ * Affiche le panneau latéral détaillé.
+ * @param {string} id
+ * @param {[number,number]} runwayStart
+ */
+export function showDetailPanel(id, runwayStart) {
     const s = sonometers[id];
     if (!s) return;
 
@@ -467,10 +405,7 @@ function showDetailPanel(id) {
     const fullAddress = SONO_ADDRESSES[id] || "Adresse inconnue";
     const townName = fullAddress.split(",")[1] || "—";
 
-    // Distance à la piste active
-    const runway = document.getElementById("runway-panel").innerText.includes("22") ? "22" : "04";
-    const r = RUNWAYS[runway];
-    const d = haversineDistance([s.lat, s.lon], r.start).toFixed(2);
+    const d = haversineDistance([s.lat, s.lon], runwayStart).toFixed(2);
 
     title.textContent = id;
     address.textContent = fullAddress;
@@ -481,53 +416,64 @@ function showDetailPanel(id) {
     panel.classList.remove("hidden");
 }
 
-function haversineDistance(a, b) {
-    const R = 6371;
-    const dLat = deg2rad(b[0] - a[0]);
-    const dLon = deg2rad(b[1] - a[1]);
-    const lat1 = deg2rad(a[0]);
-    const lat2 = deg2rad(b[0]);
+/**
+ * Initialise les sonomètres sur la carte.
+ * @param {L.Map} map
+ */
+export function initSonometers(map) {
+    SONOS.forEach(s => {
+        const marker = L.circleMarker([s.lat, s.lon], {
+            radius: 6,
+            color: "gray",
+            fillColor: "gray",
+            fillOpacity: 0.9,
+            weight: 1
+        }).addTo(map);
 
-    const h = Math.sin(dLat/2)**2 +
-              Math.cos(lat1) * Math.cos(lat2) *
-              Math.sin(dLon/2)**2;
+        const address = SONO_ADDRESSES[s.id] || "Adresse inconnue";
 
-    return 2 * R * Math.asin(Math.sqrt(h));
+        marker.bindTooltip(s.id);
+
+        marker.on("click", () => {
+            marker.bindPopup(`<b>${s.id}</b><br>${address}`).openPopup();
+            highlightSonometerInList(s.id);
+            showDetailPanel(s.id, [50.64695, 5.44340]); // centre piste 22
+        });
+
+        sonometers[s.id] = { ...s, marker, status: "UNKNOWN" };
+    });
 }
-
 // ======================================================
 // METAR
 // ======================================================
 
-async function loadMetar() {
+import { ENDPOINTS } from "./config.js";
+import { fetchJSON, updateStatusPanel } from "./helpers.js";
+import { getRunwayFromWind, computeCrosswind } from "./runways.js";
+import { updateHeatmap, sonometers } from "./sonometers.js";
+import { drawRunway, drawCorridor, RUNWAYS } from "./runways.js";
+
+/**
+ * Charge le METAR depuis le proxy.
+ */
+export async function loadMetar() {
     const data = await fetchJSON(ENDPOINTS.metar);
     updateMetarUI(data);
     updateStatusPanel("METAR", data);
 }
 
-function getPhase(runway, windDir) {
-    if (!runway || !windDir) return "takeoff";
-
-    if (runway === "22")
-        return (windDir >= 200 && windDir <= 260) ? "landing" : "takeoff";
-
-    if (runway === "04")
-        return (windDir >= 20 && windDir <= 80) ? "landing" : "takeoff";
-
-    return "takeoff";
-}
-
-function updateMetarUI(data) {
+/**
+ * Met à jour l’UI METAR + piste + sonomètres.
+ * @param {object} data
+ */
+export function updateMetarUI(data) {
     const el = document.getElementById("metar");
     if (!el) return;
 
     if (!data || !data.raw) {
         el.innerText = "METAR indisponible";
-        drawCorridor("UNKNOWN");
         drawRunway("UNKNOWN");
-        updateRunwayPanel("UNKNOWN", null, null, null);
-        updateSonometersAdvanced("UNKNOWN", "takeoff");
-        updateSonometerPanel();
+        drawCorridor("UNKNOWN");
         return;
     }
 
@@ -537,48 +483,53 @@ function updateMetarUI(data) {
     const windSpeed = data.wind_speed?.value;
 
     const runway = getRunwayFromWind(windDir);
-    const phase = getPhase(runway, windDir);
+    const r = RUNWAYS[runway];
 
-    updateSonometersAdvanced(runway, phase);
-    updateSonometerPanel();
+    drawRunway(runway, window.runwayLayer);
+    drawCorridor(runway, window.corridorLayer);
 
-    updateRunwayPanel(runway, windDir, windSpeed, phase);
-
-    drawRunway(runway);
-    drawCorridor(runway);
+    updateHeatmap(window.map);
 }
+import { ENDPOINTS } from "./config.js";
+import { fetchJSON } from "./helpers.js";
 
-// ======================================================
-// TAF
-// ======================================================
-
-async function loadTaf() {
+/**
+ * Charge le TAF.
+ */
+export async function loadTaf() {
     const data = await fetchJSON(ENDPOINTS.taf);
     updateTafUI(data);
 }
 
-function updateTafUI(data) {
+/**
+ * Met à jour l’UI TAF.
+ */
+export function updateTafUI(data) {
     const el = document.getElementById("taf");
     if (!el) return;
 
     if (data.fallback) {
-        el.innerText = "TAF indisponible (fallback activé)";
+        el.innerText = "TAF indisponible (fallback)";
         return;
     }
 
     el.innerText = data.raw || "TAF disponible";
 }
+import { ENDPOINTS } from "./config.js";
+import { fetchJSON } from "./helpers.js";
 
-// ======================================================
-// FIDS
-// ======================================================
-
-async function loadFids() {
+/**
+ * Charge les FIDS.
+ */
+export async function loadFids() {
     const data = await fetchJSON(ENDPOINTS.fids);
     updateFidsUI(data);
 }
 
-function updateFidsUI(data) {
+/**
+ * Met à jour l’UI FIDS.
+ */
+export function updateFidsUI(data) {
     const container = document.getElementById("fids");
     if (!container) return;
 
@@ -615,40 +566,38 @@ function updateFidsUI(data) {
         container.appendChild(row);
     });
 }
+import { initSonometers } from "./sonometers.js";
 
-// ======================================================
-// CARTE
-// ======================================================
-
-function initMap() {
-    map = L.map("map", {
+/**
+ * Initialise la carte Leaflet.
+ */
+export function initMap() {
+    const map = L.map("map", {
         zoomControl: true,
         scrollWheelZoom: true
     }).setView([50.643, 5.443], 11);
-
-    const resetBtn = document.getElementById("reset-map");
-    if (resetBtn) {
-        resetBtn.onclick = () => {
-            map.setView([50.643, 5.443], 11);
-        };
-    }
 
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
         attribution: "&copy; OpenStreetMap"
     }).addTo(map);
 
-    runwayLayer = L.layerGroup().addTo(map);
-    corridorLayer = L.layerGroup().addTo(map);
+    window.runwayLayer = L.layerGroup().addTo(map);
+    window.corridorLayer = L.layerGroup().addTo(map);
 
     initSonometers(map);
+
+    const resetBtn = document.getElementById("reset-map");
+    if (resetBtn) {
+        resetBtn.onclick = () => map.setView([50.643, 5.443], 11);
+    }
+
+    return map;
 }
-
-// ======================================================
-// UI INTERACTIONS (sidebar + sono)
-// ======================================================
-
-function initUIInteractions() {
+/**
+ * Initialise les interactions UI (sidebar + sono toggle).
+ */
+export function initUI() {
     const sonoHeader = document.getElementById("sono-header");
     const sonoPanel = document.getElementById("sono-panel");
     const sonoToggle = document.getElementById("sono-toggle");
@@ -669,14 +618,15 @@ function initUIInteractions() {
         };
     }
 }
-
-// ======================================================
-// INITIALISATION GLOBALE
-// ======================================================
+import { initMap } from "./map.js";
+import { initUI } from "./ui.js";
+import { loadMetar } from "./metar.js";
+import { loadTaf } from "./taf.js";
+import { loadFids } from "./fids.js";
 
 window.onload = () => {
-    initMap();
-    initUIInteractions();
+    window.map = initMap();
+    initUI();
     loadMetar();
     loadTaf();
     loadFids();
