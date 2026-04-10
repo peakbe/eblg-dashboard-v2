@@ -9,20 +9,26 @@ app.use(cors({ origin: "*" }));
 
 async function safeFetch(url) {
     try {
+        console.log("[FETCH] URL:", url);
+
         const res = await fetch(url);
 
+        console.log("[FETCH] HTTP STATUS:", res.status);
+
         if (!res.ok) {
-            console.error("[FIDS ERROR] HTTP", res.status, "for", url);
-            return { fallback: true, status: res.status };
+            const text = await res.text();
+            console.error("[FETCH ERROR] Body:", text);
+            return { fallback: true, status: res.status, body: text };
         }
 
         return await res.json();
 
     } catch (err) {
-        console.error("[FIDS ERROR] Exception:", err.message);
+        console.error("[FETCH EXCEPTION]", err);
         return { fallback: true, error: err.message };
     }
 }
+
 
 
 app.get("/metar", async (req, res) => {
